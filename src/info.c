@@ -78,9 +78,18 @@ int opus_head_parse(OpusHead *_head,const unsigned char *_data,size_t _len){
     }
     if(_head!=NULL)memcpy(_head->mapping,_data+21,head.channel_count);
   }
-  /*General purpose players should not attempt to play back content with
-     channel mapping family 255.*/
-  else if(head.mapping_family==255)return OP_EIMPL;
+  else if(head.mapping_family==255){
+    if (head.channel_count>0 && head.channel_count<=OP_NCHANNELS_MAX){
+      int i;
+      for(i=0; i<head.channel_count; i++) head.mapping[i]=i;
+      head.stream_count=_data[19];
+      head.coupled_count=_data[20];
+      if(_head!=NULL)memcpy(_head->mapping,_data+21,head.channel_count);
+    }
+    else{
+      return OP_EIMPL;
+    }
+  }
   /*No other channel mapping families are currently defined.*/
   else return OP_EBADHEADER;
   if(_head!=NULL)memcpy(_head,&head,head.mapping-(unsigned char *)&head);
