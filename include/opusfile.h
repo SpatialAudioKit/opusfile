@@ -100,17 +100,18 @@
    This makes application support for chained files with <tt>libopusfile</tt>
     very easy.*/
 
-# if defined(__cplusplus)
-extern "C" {
-# endif
 
 # include <stdarg.h>
 # include <stdio.h>
 # include <ogg/ogg.h>
-# include <opus_multistream.h>
+# include <opus/opus_multistream.h>
 #ifdef OPUS_HAVE_OPUS_PROJECTION_H
-#include <opus_projection.h>
+#include <opus/opus_projection.h>
 #endif
+
+# if defined(__cplusplus)
+extern "C" {
+# endif
 /**@cond PRIVATE*/
 
 /*Enable special features for gcc and gcc-compatible compilers.*/
