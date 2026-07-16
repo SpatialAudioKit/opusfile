@@ -221,6 +221,11 @@ struct OggOpusFile{
   op_decode_cb_func  decode_cb;
   /*The application-provided packet decode callback context.*/
   void              *decode_cb_ctx;
+  /*The number of decoded output channels requested by the application.
+    A value of 0 decodes the stream's full channel count.*/
+  int                output_channel_count;
+  /*The source channel index for each requested decoded output channel.*/
+  unsigned char      output_channel_mapping[OP_NCHANNELS_MAX];
   /*The stream count used to initialize the decoder.*/
   int                od_stream_count;
   /*The coupled stream count used to initialize the decoder.*/
