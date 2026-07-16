@@ -1815,6 +1815,42 @@ typedef int (*op_decode_cb_func)(void *_ctx,OpusMSDecoder *_decoder,void *_pcm,
 void op_set_decode_callback(OggOpusFile *_of,
  op_decode_cb_func _decode_cb,void *_ctx) OP_ARG_NONNULL(1);
 
+/**Sets a channel subset/remapping for decoded output.
+   By default, op_read() and op_read_float() return all channels described by
+    the current link's OpusHead.
+   This function lets applications request a smaller decoded output layout.
+   Each entry in \a _mapping is an original source channel index from the
+    OpusHead, and the decoded output channel at the same position receives
+    that source channel.
+   For example, a mapping of <code>{0}</code> with \a _channel_count set to 1
+    makes op_read_float() return channel 0 only.
+   While this mapping is active, op_read() and op_read_float() return PCM with
+    \a _channel_count channels, even though op_head() still reports the source
+    stream's original channel count.
+
+   This is primarily useful for channel mapping family 255 files with discrete,
+    uncoupled streams, where lower layers can avoid decoding unused streams.
+
+   For best results, call this immediately after opening the file and before
+    reading any PCM.
+   Calling it later clears buffered decoded data and resets the packet decoder.
+
+   Passing \a _channel_count as 0 clears the mapping and restores full-channel
+    decoding.
+
+   \param _of            The \c OggOpusFile on which to set the mapping.
+   \param _mapping       The source channel index for each decoded output
+                          channel, or <code>NULL</code> when
+                          \a _channel_count is 0.
+   \param _channel_count The number of decoded output channels to request.
+   \retval 0          Success.
+   \retval #OP_EINVAL The mapping count or pointer was invalid.*/
+OP_WARN_UNUSED_RESULT int op_set_decode_channel_mapping(OggOpusFile *_of,
+ const unsigned char *_mapping,int _channel_count) OP_ARG_NONNULL(1);
+
+/**Clears any channel subset/remapping set by op_set_decode_channel_mapping().*/
+void op_clear_decode_channel_mapping(OggOpusFile *_of) OP_ARG_NONNULL(1);
+
 /**Gain offset type that indicates that the provided offset is relative to the
     header gain.
    This is the default.*/

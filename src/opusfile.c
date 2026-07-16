@@ -1355,22 +1355,36 @@ static void op_update_gain(OggOpusFile *_of){
 
 static int op_make_decode_ready(OggOpusFile *_of){
   const OpusHead *head;
+  unsigned char   mapping[OP_NCHANNELS_MAX];
   int             li;
   int             stream_count;
   int             coupled_count;
   int             channel_count;
+  int             ci;
   if(_of->ready_state>OP_STREAMSET)return 0;
   if(OP_UNLIKELY(_of->ready_state<OP_STREAMSET))return OP_EFAULT;
   li=_of->seekable?_of->cur_link:0;
   head=&_of->links[li].head;
   stream_count=head->stream_count;
   coupled_count=head->coupled_count;
-  channel_count=head->channel_count;
+  if(_of->output_channel_count>0){
+    if(head->mapping_family==3)return OP_EIMPL;
+    channel_count=_of->output_channel_count;
+    for(ci=0;ci<channel_count;ci++){
+      int source_channel;
+      source_channel=_of->output_channel_mapping[ci];
+      if(source_channel<0||source_channel>=head->channel_count)return OP_EINVAL;
+      mapping[ci]=head->mapping[source_channel];
+    }
+  }
+  else{
+    channel_count=head->channel_count;
+    memcpy(mapping,head->mapping,sizeof(*mapping)*channel_count);
+  }
   /*Check to see if the current decoder is compatible with the current link.*/
   if(_of->od!=NULL&&_of->od_stream_count==stream_count
    &&_of->od_coupled_count==coupled_count&&_of->od_channel_count==channel_count
-   &&memcmp(_of->od_mapping,head->mapping,
-   sizeof(*head->mapping)*channel_count)==0){
+   &&memcmp(_of->od_mapping,mapping,sizeof(*mapping)*channel_count)==0){
     opus_multistream_decoder_ctl(_of->od,OPUS_RESET_STATE);
   }
   else{
@@ -1394,13 +1408,13 @@ static int op_make_decode_ready(OggOpusFile *_of){
     else{
       opus_multistream_decoder_destroy(_of->od);
       _of->od=opus_multistream_decoder_create(48000,channel_count,
-      stream_count,coupled_count,head->mapping,&err);
+      stream_count,coupled_count,mapping,&err);
       if(_of->od==NULL)return OP_EFAULT;
     }
     _of->od_stream_count=stream_count;
     _of->od_coupled_count=coupled_count;
     _of->od_channel_count=channel_count;
-    memcpy(_of->od_mapping,head->mapping,sizeof(*head->mapping)*channel_count);
+    memcpy(_of->od_mapping,mapping,sizeof(*mapping)*channel_count);
   }
   _of->ready_state=OP_INITSET;
   _of->bytes_tracked=0;
@@ -2770,6 +2784,48 @@ void op_set_decode_callback(OggOpusFile *_of,
   _of->decode_cb_ctx=_ctx;
 }
 
+int op_set_decode_channel_mapping(OggOpusFile *_of,
+ const unsigned char *_mapping,int _channel_count){
+  int ready_state;
+  int ci;
+  if(_channel_count<0||_channel_count>OP_NCHANNELS_MAX)return OP_EINVAL;
+  if(_channel_count>0&&_mapping==NULL)return OP_EINVAL;
+  for(ci=0;ci<_channel_count;ci++){
+    if(_mapping[ci]>=OP_NCHANNELS_MAX)return OP_EINVAL;
+  }
+  ready_state=_of->ready_state;
+  _of->output_channel_count=_channel_count;
+  if(_channel_count>0){
+    memcpy(_of->output_channel_mapping,_mapping,
+     sizeof(*_of->output_channel_mapping)*_channel_count);
+  }
+  _of->od_buffer_pos=0;
+  _of->od_buffer_size=0;
+  _ogg_free(_of->od_buffer);
+  _of->od_buffer=NULL;
+  opus_multistream_decoder_destroy(_of->od);
+  _of->od=NULL;
+#ifdef OPUS_HAVE_OPUS_PROJECTION_H
+  opus_projection_decoder_destroy(_of->st);
+  _of->st=NULL;
+#endif
+  _of->od_stream_count=0;
+  _of->od_coupled_count=0;
+  _of->od_channel_count=0;
+#if !defined(OP_FIXED_POINT)
+  _of->state_channel_count=0;
+#endif
+  if(ready_state>=OP_STREAMSET){
+    _of->ready_state=OP_STREAMSET;
+    return op_make_decode_ready(_of);
+  }
+  return 0;
+}
+
+void op_clear_decode_channel_mapping(OggOpusFile *_of){
+  OP_ALWAYS_TRUE(!op_set_decode_channel_mapping(_of,NULL,0));
+}
+
 int op_set_gain_offset(OggOpusFile *_of,
  int _gain_type,opus_int32 _gain_offset_q8){
   if(_gain_type!=OP_HEADER_GAIN&&_gain_type!=OP_ALBUM_GAIN
@@ -2797,7 +2853,8 @@ void op_set_dither_enabled(OggOpusFile *_of,int _enabled){
    never need it.*/
 static int op_init_buffer(OggOpusFile *_of){
   int nchannels_max;
-  if(_of->seekable){
+  if(_of->output_channel_count>0)nchannels_max=_of->output_channel_count;
+  else if(_of->seekable){
     const OggOpusLink *links;
     int                nlinks;
     int                li;
@@ -2871,7 +2928,7 @@ static int op_read_native(OggOpusFile *_of,
       int od_buffer_pos;
       int nsamples;
       int op_pos;
-      nchannels=_of->links[_of->seekable?_of->cur_link:0].head.channel_count;
+      nchannels=_of->od_channel_count;
       od_buffer_pos=_of->od_buffer_pos;
       nsamples=_of->od_buffer_size-od_buffer_pos;
       /*If we have buffered samples, return them.*/
@@ -3001,7 +3058,7 @@ static int op_filter_read_native(OggOpusFile *_of,void *_dst,int _dst_sz,
     ret=_of->od_buffer_size-od_buffer_pos;
     if(OP_LIKELY(ret>0)){
       int nchannels;
-      nchannels=_of->links[_of->seekable?_of->cur_link:0].head.channel_count;
+      nchannels=_of->od_channel_count;
       ret=(*_filter)(_of,_dst,_dst_sz,
        _of->od_buffer+nchannels*od_buffer_pos,ret,nchannels);
       OP_ASSERT(ret>=0);
